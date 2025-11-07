@@ -1,0 +1,6 @@
+{
+  "defaultResolution": "720",
+  "defaultBrowser": "firefox",
+  "maxRetries": 3,
+  "retryDelay": 5000
+}
