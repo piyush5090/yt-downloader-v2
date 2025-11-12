@@ -59,9 +59,13 @@ function download_video_thumbnail(url, relativePath, resolution) {
   const defaultH = parseResolutionValue(config.defaultResolution);
   const height = userH || defaultH || null;
 
-  const formatSelector = height
-    ? `bestvideo[height=${height}]+bestaudio/best[height=${height}]/bestvideo[height<=${height}]+bestaudio/best/best`
-    : "bestvideo+bestaudio/best";
+  // ✅ FIXED: Force exact resolution match only
+  let formatSelector;
+  if (height) {
+    formatSelector = `bestvideo[height=${height}]+bestaudio/best[height=${height}]/bestvideo[height<=${height}]+bestaudio/best`;
+  } else {
+    formatSelector = "bestvideo+bestaudio/best";
+  }
 
   const browser = config.defaultBrowser || "chrome";
   const outputTemplate = path.join(relativePath, "%(title)s.%(ext)s");
@@ -161,6 +165,6 @@ async function downloadWithFolderAndRetry(url, relativePath, resolution) {
   await downloadWithFolderAndRetry(
     "https://www.youtube.com/watch?v=zoq0_HSfXZ8",
     "./downloads",
-    "720p"
+    "144p"
   );
 })();

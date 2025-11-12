@@ -1,4 +1,4 @@
-import { spawn } from "child_process";
+import { spawn, execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import readline from "readline";
@@ -9,23 +9,54 @@ const __dirname = path.dirname(__filename);
 const configPath = path.join(__dirname, "../config/config.json");
 const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
 
+// Helper: parse resolution like "720p" -> 720
 function parseResolutionValue(res) {
   if (!res) return null;
   const m = String(res).trim().match(/^(\d+)\s*p?$/i);
   return m ? Number(m[1]) : null;
 }
 
-function download_video_only(url, relativePath, resolution) {
+// Helper: sanitize folder name (remove invalid characters)
+function sanitizeFileName(name) {
+  return name.replace(/[<>:"/\\|?*\x00-\x1F]/g, "").trim();
+}
+
+// NEW: fetch title and ID using yt-dlp
+function getVideoMetadata(url) {
+  try {
+    const title = execSync(`yt-dlp --get-title ${url}`, { encoding: "utf8" }).trim();
+    const id = execSync(`yt-dlp --get-id ${url}`, { encoding: "utf8" }).trim();
+    return { title, id };
+  } catch (err) {
+    console.error("❌ Failed to fetch video metadata:", err.message);
+    return null;
+  }
+}
+
+function download_video_only(url, basePath, resolution) {
   if (!url) {
     console.error("❌ Error: URL is required.");
     return;
   }
+
+  // Fetch metadata before downloading
+  const meta = getVideoMetadata(url);
+  if (!meta) return;
+
+  // Build folder structure
+  const folderName = sanitizeFileName(`${meta.title}_${meta.id}`);
+  const relativePath = path.join(basePath, folderName);
+
   if (!fs.existsSync(relativePath)) fs.mkdirSync(relativePath, { recursive: true });
 
+  console.log(`📂 Created folder: ${relativePath}`);
+
+  // Same resolution logic as before
   const userH = parseResolutionValue(resolution);
   const defaultH = parseResolutionValue(config.defaultResolution);
   const height = userH || defaultH || null;
 
+  // Format selection (unchanged)
   let formatSelector;
   if (height) {
     formatSelector = `bestvideo[height=${height}]+bestaudio/best[height=${height}]/bestvideo[height<=${height}]+bestaudio/best`;
@@ -46,6 +77,7 @@ function download_video_only(url, relativePath, resolution) {
 
   const yt = spawn("yt-dlp", args);
 
+  // Spinner + progress bar (same as before)
   const spinnerFrames = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
   let spinnerIndex = 0;
   let progressActive = false;
@@ -68,7 +100,6 @@ function download_video_only(url, relativePath, resolution) {
   const handleData = (chunk) => {
     const text = chunk.toString();
 
-    // Detect progress (like "12.3%")
     const m = text.match(/(\d+(?:\.\d+)?)\s*%/);
     if (m) {
       progressActive = true;
@@ -77,13 +108,8 @@ function download_video_only(url, relativePath, resolution) {
       return;
     }
 
-    // Filter: hide unnecessary noise (only show minimal info)
-    // Skip lines that are warnings, extracting, downloading metadata, etc.
-    if (
-      /\b(Extracting|Downloading|WARNING|Signature|tv client|player|m3u8|info|cookies)\b/i.test(text)
-    ) return;
+    if (/\b(Extracting|Downloading|WARNING|Signature|tv client|player|m3u8|info|cookies)\b/i.test(text)) return;
 
-    // Show destination message once
     if (/Destination/i.test(text)) {
       console.log("\n🎯 " + text.trim());
     }
@@ -112,5 +138,5 @@ function download_video_only(url, relativePath, resolution) {
 download_video_only(
   "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
   "./downloads",
-  "1440p"
+  "144p"
 );
