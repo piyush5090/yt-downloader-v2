@@ -118,13 +118,30 @@ function extractImportantMetadata(folderPath) {
   }
 }
 
+function parseResolutionValue(res) {
+  if (!res) return null;
+  const m = String(res).trim().match(/^(\d+)\s*p?$/i);
+  return m ? Number(m[1]) : null;
+}
+
 // ---- Core download (video only) ----
-function downloadVideoOnly(url, folderPath) {
+function downloadVideoOnly(url, folderPath,resolution) {
+
+  const userH = parseResolutionValue(resolution);
+  const defaultH = parseResolutionValue(config.defaultResolution);
+  const height = userH || defaultH || null;
+
+  let formatSelector;
+  if (height) {
+    formatSelector = `bestvideo[height=${height}]+bestaudio/best[height=${height}]/bestvideo[height<=${height}]+bestaudio/best`;
+  } else {
+    formatSelector = "bestvideo+bestaudio/best";
+  }
+
   return new Promise((resolve) => {
     const outputTemplate = path.join(folderPath, "%(title)s.%(ext)s");
     const args = [
-      "-f",
-      "bestvideo+bestaudio/best",
+      "-f", formatSelector,
       "--merge-output-format",
       "mp4",
       "--cookies-from-browser",
@@ -192,7 +209,7 @@ function downloadVideoOnly(url, folderPath) {
 }
 
 // ---- Wrapper: folder setup + retry logic ----
-async function downloadWithFolderAndRetry(url, relativePath) {
+async function downloadWithFolderAndRetry(url, relativePath, resolution) {
   const info = getVideoInfo(url);
   if (!info) return;
 
@@ -207,7 +224,7 @@ async function downloadWithFolderAndRetry(url, relativePath) {
 
   let success = false;
   for (let attempt = 1; attempt <= config.maxRetries; attempt++) {
-    success = await downloadVideoOnly(url, videoFolder);
+    success = await downloadVideoOnly(url, videoFolder,resolution);
     if (success) break;
     if (attempt < config.maxRetries) {
       console.log(`⏳ Retry in ${config.retryDelay / 1000}s...`);
@@ -223,6 +240,7 @@ async function downloadWithFolderAndRetry(url, relativePath) {
 (async () => {
   await downloadWithFolderAndRetry(
     "https://www.youtube.com/watch?v=zoq0_HSfXZ8",
-    "./downloads"
+    "./downloads",
+    "144p"
   );
 })();
