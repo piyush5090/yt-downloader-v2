@@ -137,7 +137,7 @@ function download_video_thumbnail(url, relativePath, resolution) {
 }
 
 // ---- Wrapper with folder + retry logic ----
-async function downloadWithFolderAndRetry(url, relativePath, resolution) {
+async function download_vid_and_thumbnail(url, relativePath, resolution) {
   const info = getVideoInfo(url);
   if (!info) return;
 
@@ -162,7 +162,7 @@ async function downloadWithFolderAndRetry(url, relativePath, resolution) {
 
 // ---- Example Usage ----
 (async () => {
-  await downloadWithFolderAndRetry(
+  await download_vid_and_thumbnail(
     "https://www.youtube.com/watch?v=zoq0_HSfXZ8",
     "./downloads",
     "144p"
