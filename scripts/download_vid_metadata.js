@@ -8,6 +8,7 @@
  * - Extracts imp_data.json (keeps full description)
  * - Deletes metadata.json and any yt-dlp *.info.json files afterward
  * - Retries and progress feedback
+ * - Handles invalid Windows filenames safely
  */
 
 import { spawn, execSync } from "child_process";
@@ -39,7 +40,18 @@ if (fs.existsSync(configPath)) {
 // ---- HELPERS ----
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function sanitizeName(name) {
-  return name.replace(/[^a-zA-Z0-9 _-]/g, "_").trim();
+  return name
+    .normalize("NFKD")          // split accents
+    .replace(/[^\x00-\x7F]/g, "") // remove non-ASCII
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "") 
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseResolutionValue(res) {
+  if (!res) return null;
+  const m = String(res).trim().match(/^(\d+)\s*p?$/i);
+  return m ? Number(m[1]) : null;
 }
 
 // ---- Fetch basic info ----
@@ -74,7 +86,7 @@ function extractImportantMetadata(folderPath) {
     const important = {
       id: metadata.id,
       title: metadata.title,
-      description: metadata.description, // full description kept
+      description: metadata.description,
       channel: metadata.channel,
       channel_id: metadata.channel_id,
       uploader: metadata.uploader,
@@ -98,7 +110,7 @@ function extractImportantMetadata(folderPath) {
       console.warn("⚠️ Could not delete metadata.json:", e.message);
     }
 
-    // Also remove any yt-dlp generated .info.json files (e.g. "Title.info.json")
+    // Also remove any yt-dlp generated .info.json files
     try {
       const files = fs.readdirSync(folderPath);
       const infoFiles = files.filter((f) => f.endsWith(".info.json"));
@@ -118,15 +130,8 @@ function extractImportantMetadata(folderPath) {
   }
 }
 
-function parseResolutionValue(res) {
-  if (!res) return null;
-  const m = String(res).trim().match(/^(\d+)\s*p?$/i);
-  return m ? Number(m[1]) : null;
-}
-
 // ---- Core download (video only) ----
-function downloadVideoOnly(url, folderPath,resolution) {
-
+function downloadVideoOnly(url, folderPath, resolution) {
   const userH = parseResolutionValue(resolution);
   const defaultH = parseResolutionValue(config.defaultResolution);
   const height = userH || defaultH || null;
@@ -139,14 +144,16 @@ function downloadVideoOnly(url, folderPath,resolution) {
   }
 
   return new Promise((resolve) => {
-    const outputTemplate = path.join(folderPath, "%(title)s.%(ext)s");
+    const outputTemplate = path.join(folderPath, "%(title).70s.%(ext)s"); // shorter safe name
     const args = [
-      "-f", formatSelector,
+      "--windows-filenames",
+      "-f",
+      formatSelector,
       "--merge-output-format",
       "mp4",
       "--cookies-from-browser",
       config.defaultBrowser,
-      "--write-info-json", // yt-dlp will create a .info.json file per video
+      "--write-info-json",
       "--no-warnings",
       "-o",
       outputTemplate,
@@ -154,9 +161,10 @@ function downloadVideoOnly(url, folderPath,resolution) {
     ];
 
     const yt = spawn("yt-dlp", args);
-    const spinnerFrames = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
+    const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     let spinnerIndex = 0;
     let progressActive = false;
+    let stderrData = "";
 
     const renderProgressBar = (percent) => {
       const barLength = 30;
@@ -186,7 +194,10 @@ function downloadVideoOnly(url, folderPath,resolution) {
     };
 
     yt.stdout.on("data", handleData);
-    yt.stderr.on("data", handleData);
+    yt.stderr.on("data", (chunk) => {
+      handleData(chunk);
+      stderrData += chunk.toString();
+    });
 
     yt.on("close", (code) => {
       clearInterval(spinner);
@@ -196,20 +207,23 @@ function downloadVideoOnly(url, folderPath,resolution) {
         resolve(true);
       } else {
         console.error("\n❌ Download failed.");
+        if (stderrData.trim()) {
+          console.error("\n🔍 Full yt-dlp error log:\n" + stderrData.trim());
+        }
         resolve(false);
       }
     });
 
-    yt.on("error", () => {
+    yt.on("error", (err) => {
       clearInterval(spinner);
-      console.error("\n❌ yt-dlp failed to start.");
+      console.error("\n❌ yt-dlp failed to start:", err.message);
       resolve(false);
     });
   });
 }
 
 // ---- Wrapper: folder setup + retry logic ----
-async function downloadWithFolderAndRetry(url, relativePath, resolution) {
+async function download_video_and_metadata(url, relativePath, resolution) {
   const info = getVideoInfo(url);
   if (!info) return;
 
@@ -219,12 +233,11 @@ async function downloadWithFolderAndRetry(url, relativePath, resolution) {
 
   console.log(`📁 ${safeTitle}_${info.id}`);
 
-  // save full metadata.json (pre-download)
   saveMetadata(videoFolder, info);
 
   let success = false;
   for (let attempt = 1; attempt <= config.maxRetries; attempt++) {
-    success = await downloadVideoOnly(url, videoFolder,resolution);
+    success = await downloadVideoOnly(url, videoFolder, resolution);
     if (success) break;
     if (attempt < config.maxRetries) {
       console.log(`⏳ Retry in ${config.retryDelay / 1000}s...`);
@@ -238,8 +251,8 @@ async function downloadWithFolderAndRetry(url, relativePath, resolution) {
 
 // ---- Example usage ----
 (async () => {
-  await downloadWithFolderAndRetry(
-    "https://www.youtube.com/watch?v=zoq0_HSfXZ8",
+  await download_video_and_metadata(
+    "https://www.youtube.com/watch?v=CohCbBfgO0o",
     "./downloads",
     "144p"
   );

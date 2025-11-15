@@ -1,4 +1,4 @@
-import { spawn, execSync } from "child_process";
+import { spawn, execFileSync, execSync  } from "child_process";
 import fs from "fs";
 import path from "path";
 import readline from "readline";
@@ -9,29 +9,37 @@ const __dirname = path.dirname(__filename);
 const configPath = path.join(__dirname, "../config/config.json");
 const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
 
-// Helper: parse resolution like "720p" -> 720
+// ✅ Helper: parse resolution like "720p" -> 720
 function parseResolutionValue(res) {
   if (!res) return null;
   const m = String(res).trim().match(/^(\d+)\s*p?$/i);
   return m ? Number(m[1]) : null;
 }
 
-// Helper: sanitize folder name (remove invalid characters)
+// ✅ Helper: sanitize folder/file name (remove invalid characters)
 function sanitizeFileName(name) {
-  return name.replace(/[<>:"/\\|?*\x00-\x1F]/g, "").trim();
+  return name
+    .normalize("NFKD")          // split accents
+    .replace(/[^\x00-\x7F]/g, "") // remove non-ASCII
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "") 
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-// NEW: fetch title and ID using yt-dlp
-function getVideoMetadata(url) {
+
+// ✅ Fetch title and ID safely using yt-dlp and sanitize immediately
+function getVideoInfo(url) {
   try {
-    const title = execSync(`yt-dlp --get-title ${url}`, { encoding: "utf8" }).trim();
-    const id = execSync(`yt-dlp --get-id ${url}`, { encoding: "utf8" }).trim();
-    return { title, id };
+    const output = execFileSync("yt-dlp", ["--skip-download", "--print-json", url], {
+      encoding: "utf8",
+    });
+    return JSON.parse(output);
   } catch (err) {
-    console.error("❌ Failed to fetch video metadata:", err.message);
+    console.error("❌ Failed to fetch video info.");
     return null;
   }
 }
+
 
 function download_video_only(url, basePath, resolution) {
   if (!url) {
@@ -39,11 +47,11 @@ function download_video_only(url, basePath, resolution) {
     return;
   }
 
-  // Fetch metadata before downloading
-  const meta = getVideoMetadata(url);
+  // ✅ Fetch and sanitize metadata before downloading
+  const meta = getVideoInfo(url);
   if (!meta) return;
 
-  // Build folder structure
+  // ✅ Create safe folder name
   const folderName = sanitizeFileName(`${meta.title}_${meta.id}`);
   const relativePath = path.join(basePath, folderName);
 
@@ -51,12 +59,11 @@ function download_video_only(url, basePath, resolution) {
 
   console.log(`📂 Created folder: ${relativePath}`);
 
-  // Same resolution logic as before
+  // ✅ Handle resolution logic (UNCHANGED)
   const userH = parseResolutionValue(resolution);
   const defaultH = parseResolutionValue(config.defaultResolution);
   const height = userH || defaultH || null;
 
-  // Format selection (unchanged)
   let formatSelector;
   if (height) {
     formatSelector = `bestvideo[height=${height}]+bestaudio/best[height=${height}]/bestvideo[height<=${height}]+bestaudio/best`;
@@ -67,17 +74,24 @@ function download_video_only(url, basePath, resolution) {
   const browser = config.defaultBrowser || "chrome";
   const outputTemplate = path.join(relativePath, "%(title)s.%(ext)s");
 
+  // ✅ yt-dlp arguments (INFO.JSON removed, subtitles added)
   const args = [
+    "--windows-filenames",
     "-f", formatSelector,
     "--merge-output-format", "mp4",
     "--cookies-from-browser", browser,
+    "--no-warnings",
+    "--write-subs",               // ✅ Download subtitles
+    "--sub-lang", "en,*",         // ✅ Prefer English, fallback to any available
+    "--sub-format", "srt",        // ✅ Save in SRT format
+    "--convert-subs", "srt",      // ✅ Convert to .srt if needed
     "-o", outputTemplate,
     url,
   ];
 
   const yt = spawn("yt-dlp", args);
 
-  // Spinner + progress bar (same as before)
+  // ✅ Spinner + progress bar
   const spinnerFrames = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
   let spinnerIndex = 0;
   let progressActive = false;
@@ -99,20 +113,14 @@ function download_video_only(url, basePath, resolution) {
 
   const handleData = (chunk) => {
     const text = chunk.toString();
-
     const m = text.match(/(\d+(?:\.\d+)?)\s*%/);
     if (m) {
       progressActive = true;
-      const pct = parseFloat(m[1]);
-      renderProgressBar(pct);
+      renderProgressBar(parseFloat(m[1]));
       return;
     }
-
     if (/\b(Extracting|Downloading|WARNING|Signature|tv client|player|m3u8|info|cookies)\b/i.test(text)) return;
-
-    if (/Destination/i.test(text)) {
-      console.log("\n🎯 " + text.trim());
-    }
+    if (/Destination/i.test(text)) console.log("\n🎯 " + text.trim());
   };
 
   yt.stdout.on("data", handleData);
@@ -121,11 +129,8 @@ function download_video_only(url, basePath, resolution) {
   yt.on("close", (code) => {
     clearInterval(spinner);
     readline.cursorTo(process.stdout, 0);
-    if (code === 0) {
-      console.log("\n✅ Download complete!");
-    } else {
-      console.error(`\n❌ yt-dlp exited with code ${code}`);
-    }
+    if (code === 0) console.log("\n✅ Download complete!");
+    else console.error(`\n❌ yt-dlp exited with code ${code}`);
   });
 
   yt.on("error", (err) => {
@@ -134,9 +139,9 @@ function download_video_only(url, basePath, resolution) {
   });
 }
 
-// Example run
+// ✅ Example run
 download_video_only(
-  "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+  "https://www.youtube.com/watch?v=CohCbBfgO0o",
   "./downloads",
   "144p"
 );
