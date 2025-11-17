@@ -35,7 +35,12 @@ function parseResolutionValue(res) {
 }
 
 function sanitizeName(name) {
-  return name.replace(/[^a-zA-Z0-9 _-]/g, "_").trim();
+  return name
+    .normalize("NFKD")          // split accents
+    .replace(/[^\x00-\x7F]/g, "") // remove non-ASCII
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "") 
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 // ---- Fetch basic info ----
@@ -163,7 +168,7 @@ async function download_vid_and_thumbnail(url, relativePath, resolution) {
 // ---- Example Usage ----
 (async () => {
   await download_vid_and_thumbnail(
-    "https://www.youtube.com/watch?v=zoq0_HSfXZ8",
+    "https://www.youtube.com/watch?v=CohCbBfgO0o",
     "./downloads",
     "144p"
   );
