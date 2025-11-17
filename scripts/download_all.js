@@ -78,6 +78,10 @@ function download_video_and_thumbnail(url, relativePath, resolution) {
     "--cookies-from-browser", browser,
     "--write-thumbnail",
     "--convert-thumbnails", "jpg",
+    "--write-subs", "--write-auto-subs",
+    "--sub-langs", "en.*",
+    "--embed-subs",
+    "--no-warnings",
     "--progress",
     "-o", outputTemplate,
     url,
@@ -185,7 +189,7 @@ function extractImportantMetadata(folderPath) {
 }
 
 // ---- Wrapper with folder + retry logic ----
-async function download_vid_thu_metadata(url, relativePath, resolution) {
+async function download_all(url, relativePath, resolution) {
   const info = getVideoInfo(url);
   if (!info) return;
 
@@ -215,7 +219,7 @@ async function download_vid_thu_metadata(url, relativePath, resolution) {
 
 // ---- Example Usage ----
 (async () => {
-  await download_vid_thu_metadata(
+  await download_all(
     "https://www.youtube.com/watch?v=CohCbBfgO0o",
     "./downloads",
     "144p"
