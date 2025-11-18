@@ -42,7 +42,6 @@ function getPlaylistInfo(playlistUrl) {
         return null;
     }
 
-    // Try to get playlist title from the first video's metadata
     const firstVideo = playlistJson[0];
     const playlistTitle = firstVideo.playlist_title || firstVideo.playlist || "untitled_playlist";
     const playlistId = firstVideo.playlist_id || "no_id";
@@ -59,7 +58,6 @@ function getPlaylistInfo(playlistUrl) {
     return null;
   }
 }
-
 
 async function processPlaylist(playlistUrl) {
   const playlistInfo = getPlaylistInfo(playlistUrl);
@@ -89,12 +87,14 @@ async function processPlaylist(playlistUrl) {
         console.log(`Skipping video, failed to get info.`);
         continue;
     }
+
     const safeTitle = sanitizeName(videoInfo.title);
     const videoFolder = path.join(playlistFolder, `${safeTitle}_${videoInfo.id}`);
+    fs.mkdirSync(videoFolder, { recursive: true });  // Ensure folder exists
 
     let success = false;
     for (let attempt = 1; attempt <= config.maxRetries; attempt++) {
-        success = await download(videoUrl, videoFolder, downloadOptions);
+        success = await download(videoUrl, videoFolder,videoInfo.id, downloadOptions);
         if (success) break;
         if (attempt < config.maxRetries) {
             console.log(`⏳ Retry in ${config.retryDelay / 1000}s...`);

@@ -1,4 +1,4 @@
-import { spawn, execSync } from "child_process";
+import { spawn, execSync, execFileSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import readline from "readline";
@@ -11,7 +11,7 @@ const configPath = path.join(__dirname, "../config/config.json");
 // ---- CONFIG ----
 let config = {
   defaultResolution: "720",
-  defaultBrowser: "chrome",
+  defaultBrowser: "chrome", // e.g. chrome|firefox|edge
   maxRetries: 3,
   retryDelay: 5000,
 };
@@ -34,24 +34,25 @@ export function parseResolutionValue(res) {
 }
 
 export function sanitizeName(name) {
-  return name
-    .normalize("NFKD")          // split accents
-    .replace(/[^\x00-\x7F]/g, "") // remove non-ASCII
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "") 
-    .replace(/\s+/g, " ")
-    .trim();
+    return name
+        .replace(/[<>:"/\\|?*\x00-\x1F]/g, "")  // Remove illegal characters
+        .normalize("NFKC")                      // Unicode normalize
+        .replace(/\s+/g, "_")                   // Replace spaces with underscores
+        .replace(/\.+$/, "")                    // No trailing dots
+        .slice(0, 35)                           // Limit length to 35
+        .trim();
 }
+
 
 // ---- Fetch video info ----
 export function getVideoInfo(url) {
   try {
-    const output = execSync(`yt-dlp --skip-download --print-json "${url}"`, {
+    const output = execFileSync("yt-dlp", ["--skip-download", "--print-json", url], {
       encoding: "utf8",
     });
-    const info = JSON.parse(output);
-    return { title: info.title || "unknown_title", id: info.id || "noid" };
-  } catch {
-    console.error("❌ Failed to fetch video info.");
+    return JSON.parse(output);
+  } catch (err) {
+    console.error("❌ Failed to fetch video info:", err.message);
     return null;
   }
 }
@@ -81,7 +82,7 @@ export function extractImportantMetadata(folderPath) {
     const important = {
       id: data.id,
       title: data.title,
-      description: data.description, // keep full text
+      description: data.description,
       channel: data.channel,
       channel_id: data.channel_id,
       uploader: data.uploader,
@@ -96,7 +97,6 @@ export function extractImportantMetadata(folderPath) {
     fs.writeFileSync(impFile, JSON.stringify(important, null, 2), "utf8");
     console.log("✨ imp_data.json created successfully!");
 
-    // Delete metadata.json after success
     fs.unlinkSync(metaFile);
     console.log("🧹 metadata.json deleted.");
   } catch (err) {
@@ -108,13 +108,14 @@ export function extractImportantMetadata(folderPath) {
  * The main download function.
  * @param {string} url - The video URL.
  * @param {string} outputPath - The folder to save the files in.
+ * @param {string} fileName - Safe file name (should be sanitized).
  * @param {object} options - Download options.
  * @param {string} [options.resolution] - e.g., "1080p"
  * @param {boolean} [options.thumbnail=false] - Download thumbnail?
  * @param {boolean} [options.subtitles=false] - Download subtitles?
  * @param {boolean} [options.metadata=false] - Download metadata?
  */
-export async function download(url, outputPath, options = {}) {
+export async function download(url, outputPath, fileName, options = {}) {
   if (!url) return false;
   if (!fs.existsSync(outputPath)) fs.mkdirSync(outputPath, { recursive: true });
 
@@ -127,7 +128,7 @@ export async function download(url, outputPath, options = {}) {
     : "bestvideo+bestaudio/best";
 
   const browser = config.defaultBrowser || "chrome";
-  const outputTemplate = path.join(outputPath, "% (title)s.%(ext)s");
+  const outputTemplate = path.join(outputPath, `${fileName}.%(ext)s`);
 
   const args = [
     "-f", formatSelector,
@@ -152,14 +153,6 @@ export async function download(url, outputPath, options = {}) {
     let spinnerIndex = 0;
     let lastUpdate = Date.now();
 
-    const renderProgressBar = (percent) => {
-      const barLength = 30;
-      const filled = Math.round((percent / 100) * barLength);
-      const bar = "█".repeat(filled) + "░".repeat(barLength - filled);
-      readline.cursorTo(process.stdout, 0);
-      process.stdout.write(`📦 [${bar}] ${percent.toFixed(1)}%`);
-    };
-
     const spinner = setInterval(() => {
       const now = Date.now();
       if (now - lastUpdate > 800) {
@@ -173,11 +166,16 @@ export async function download(url, outputPath, options = {}) {
       const m = text.match(/(\d+(?:\.\d+)?)\s*%/);
       if (m) {
         lastUpdate = Date.now();
-        renderProgressBar(parseFloat(m[1]));
+        const percent = parseFloat(m[1]);
+        const bar = "█".repeat(Math.round(percent / 3.3)) + "░".repeat(30 - Math.round(percent / 3.3));
+        readline.cursorTo(process.stdout, 0);
+        process.stdout.write(`📦 [${bar}] ${percent.toFixed(1)}%`);
       }
     });
 
-    yt.stderr.on("data", () => {}); // ignore stderr warnings
+    yt.stderr.on("data", (chunk) => {
+      console.error("⚠️ yt-dlp stderr:", chunk.toString());
+    });
 
     yt.on("close", (code) => {
       clearInterval(spinner);
@@ -203,4 +201,4 @@ export async function download(url, outputPath, options = {}) {
   });
 }
 
-export { config }; // Export config for potential external use
+export { config };
