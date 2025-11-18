@@ -2,5 +2,6 @@
   "defaultResolution": "720",
   "defaultBrowser": "firefox",
   "maxRetries": 3,
-  "retryDelay": 5000
+  "retryDelay": 5000,
+  "defaultChannelSection": "/videos"
 }
