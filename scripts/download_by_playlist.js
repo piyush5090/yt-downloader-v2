@@ -59,11 +59,7 @@ function getPlaylistInfo(playlistUrl) {
   }
 }
 
-async function processPlaylist(playlistUrl) {
-  const playlistInfo = getPlaylistInfo(playlistUrl);
-  if (!playlistInfo) return;
-
-  const { choice, resolution } = await getDownloadChoice();
+async function processPlaylist(playlistInfo, choice, resolution) {
 
   const downloadOptions = {
     resolution: resolution || config.defaultResolution,
@@ -123,8 +119,11 @@ async function processPlaylist(playlistUrl) {
 
   const playlistUrls = playlistUrlsArg.split(',');
 
+  const { choice, resolution } = await getDownloadChoice();
+
   for (const url of playlistUrls) {
-    await processPlaylist(url.trim());
+    const playlistInfo = getPlaylistInfo(url.trim());
+    await processPlaylist(playlistInfo, choice, resolution);
   }
 
   console.log("\n\n🎉 All playlists processed!");
